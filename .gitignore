@@ -1,0 +1,38 @@
+# Build directories
+/build/
+/out/
+/dist/
+
+# CMake-generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+Makefile.cmake
+
+# Generic build artifacts
+*.o
+*.oo
+*.obj
+*.a
+*.so
+*.elf
+*.bin
+*.hex
+*.map
+*.lst
+*.d
+*.dep
+*.gcno
+*.gcda
+*.gcov
+
+# Logs
+*.log
+
+# Editor/OS clutter
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
