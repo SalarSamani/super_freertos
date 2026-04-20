@@ -787,16 +787,10 @@
 
         vTaskSuspendAll();
         {
-            /* Obtain the time now to make an assessment as to whether the timer
-             * has expired or not.  If obtaining the time causes the lists to switch
-             * then don't process this timer as any timers that remained in the list
-             * when the lists were switched will have been processed within the
-             * prvSampleTimeNow() function. */
             xTimeNow = prvSampleTimeNow( &xTimerListsWereSwitched );
 
             if( xTimerListsWereSwitched == pdFALSE )
             {
-                /* The tick count has not overflowed, has the timer expired? */
                 if( ( xListWasEmpty == pdFALSE ) && ( xNextExpireTime <= xTimeNow ) )
                 {
                     ( void ) xTaskResumeAll();
@@ -804,16 +798,8 @@
                 }
                 else
                 {
-                    /* The tick count has not overflowed, and the next expire
-                     * time has not been reached yet.  This task should therefore
-                     * block to wait for the next expire time or a command to be
-                     * received - whichever comes first.  The following line cannot
-                     * be reached unless xNextExpireTime > xTimeNow, except in the
-                     * case when the current timer list is empty. */
                     if( xListWasEmpty != pdFALSE )
                     {
-                        /* The current timer list is empty - is the overflow list
-                         * also empty? */
                         xListWasEmpty = listLIST_IS_EMPTY( pxOverflowTimerList );
                     }
 
@@ -821,10 +807,6 @@
 
                     if( xTaskResumeAll() == pdFALSE )
                     {
-                        /* Yield to wait for either a command to arrive, or the
-                         * block time to expire.  If a command arrived between the
-                         * critical section being exited and this yield then the yield
-                         * will not cause the task to block. */
                         taskYIELD_WITHIN_API();
                     }
                     else
