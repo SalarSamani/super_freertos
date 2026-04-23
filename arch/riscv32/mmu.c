@@ -15,6 +15,9 @@
  * ============================================================ */
 
 #include "mmu.h"
+#include "pmm.h"
+#include "FreeRTOS.h"
+#include <string.h>
 
 /* Definition of the single root page table.
  * Placed in .bss.pagetable so the linker can align it to 4 KiB.         */
@@ -53,4 +56,99 @@ void mmu_build_identity_and_highhalf(void)
 
     /* 3. (Optional) Leave the remaining high half unmapped. Anything
      *    not V=1 will trap as a page fault, which is what we want.       */
+}
+
+/* ============================================================
+ * Refine kernel megapage into per-section 4 KiB PTEs.
+ * ============================================================ */
+
+/* Linker-exported section boundaries (virtual addresses). */
+extern char _stext[], _etext[], _srodata[], _erodata[], _sdata[], _ebss[];
+
+/* The megapage at L1[512] maps VA 0x80000000 → PA 0x00000000.
+ * KVA_TO_PA strips the high bit to recover the physical address. */
+#define KVA_TO_PA(v)  ((uint32_t)(v) - KERNEL_VA_BASE)
+
+typedef uint32_t pte_t;
+
+/* L2 table for the kernel image slot — lives in .bss, inside the megapage
+ * it replaces. 4 KiB aligned so it can be installed as a page-table page. */
+static pte_t kernel_l2[1024] __attribute__((aligned(4096)));
+
+static inline void sfence_vma_all(void) {
+    __asm__ volatile ("sfence.vma zero, zero" ::: "memory");
+}
+static inline void mem_fence(void) {
+    __asm__ volatile ("fence rw,rw" ::: "memory");
+}
+
+static inline pte_t make_leaf_pte(uint32_t pa, uint32_t flags) {
+    return ((pa >> PAGE_SHIFT) << 10) | flags | PTE_V;
+}
+static inline pte_t make_nonleaf_pte(uint32_t pt_pa) {
+    return ((pt_pa >> PAGE_SHIFT) << 10) | PTE_V;
+}
+
+#define PAGE_SHIFT  12
+#define VPN1(va)    (((va) >> 22) & 0x3FF)
+#define VPN0(va)    (((va) >> 12) & 0x3FF)
+
+static uint32_t kernel_page_flags(uint32_t va)
+{
+    uint32_t base = PTE_G | PTE_A | PTE_D;
+    if (va >= (uint32_t)_stext   && va < (uint32_t)_etext)   return base | PTE_R | PTE_X;
+    if (va >= (uint32_t)_srodata && va < (uint32_t)_erodata) return base | PTE_R;
+    if (va >= (uint32_t)_sdata   && va < (uint32_t)_ebss)    return base | PTE_R | PTE_W;
+    /* Boot code, page tables, ISR stack, heap — all RW. */
+    return base | PTE_R | PTE_W;
+}
+
+void mmu_refine_kernel_megapage(void)
+{
+    /* 1. Build 1024 leaf PTEs covering VA 0x80000000..0x803FFFFF. */
+    for (uint32_t i = 0; i < 1024; ++i) {
+        uint32_t va = KERNEL_VA_BASE + i * (1u << PAGE_SHIFT);
+        uint32_t pa = KVA_TO_PA(va);
+        ((volatile pte_t *)kernel_l2)[i] = make_leaf_pte(pa, kernel_page_flags(va));
+    }
+
+    /* 2. Ensure all L2 stores are visible before the L1 flip. */
+    mem_fence();
+
+    /* 3. Replace the L1 leaf megapage with a pointer to the new L2 table. */
+    uint32_t l2_pa = KVA_TO_PA((uint32_t)(uintptr_t)kernel_l2);
+    ((volatile pte_t *)g_kernel_root_pt)[VPN1(KERNEL_VA_BASE)] =
+        make_nonleaf_pte(l2_pa);
+
+    /* 4. Flush TLB — non-leaf PTE change requires sfence.vma with rs1=x0.
+     *    Also reload satp to force a total TLB flush (covers global PTEs
+     *    on implementations where sfence.vma may retain them).            */
+    sfence_vma_all();
+    { uint32_t _s; __asm__ volatile("csrr %0,satp":"=r"(_s));
+      __asm__ volatile("csrw satp,%0" :: "r"(_s) : "memory");
+      __asm__ volatile("sfence.vma zero,zero":::"memory"); }
+
+}
+
+/* ============================================================
+ * Install direct physmap at VA 0xC0000000.
+ * After this call: any PA can be accessed at VA = PA + 0xC0000000.
+ * ============================================================ */
+void mmu_install_physmap(uintptr_t ram_start, uintptr_t ram_end)
+{
+    void *pt_pa = pmm_alloc_page();
+    configASSERT(pt_pa != NULL);
+    pte_t *pt_kva = (pte_t *)((uintptr_t)pt_pa + KERNEL_VA_BASE);
+    memset(pt_kva, 0, 1u << PAGE_SHIFT);
+
+    for (uintptr_t pa = ram_start; pa < ram_end; pa += (1u << PAGE_SHIFT)) {
+        uintptr_t va = pa + PHYSMAP_BASE;
+        uint32_t flags = PTE_G | PTE_A | PTE_D | PTE_R | PTE_W;
+        pt_kva[VPN0(va)] = make_leaf_pte((uint32_t)pa, flags);
+    }
+
+    mem_fence();
+    ((volatile pte_t *)g_kernel_root_pt)[VPN1(PHYSMAP_BASE)] =
+        make_nonleaf_pte((uint32_t)pt_pa);
+    sfence_vma_all();
 }

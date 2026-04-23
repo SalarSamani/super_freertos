@@ -10,6 +10,9 @@ cmake_install.cmake
 compile_commands.json
 Makefile.cmake
 port_initial.md
+kernel_mem.md
+process_mem.md
+user_fault.md
 
 # Generic build artifacts
 *.o

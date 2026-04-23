@@ -62,20 +62,27 @@ SECTIONS
      *  single Sv32 megapage mapping VA 0x80000000 → PA 0x00000000
      *  translates every kernel VA to the correct physical location.
      * ---------------------------------------------------------- */
-    .text : AT(ADDR(.text) - 0x80000000) {
+    .text : AT(ADDR(.text) - 0x80000000) ALIGN(4096) {
         __text_start = .;
+        _stext = .;
+        *(.text.init)
         *(.text .text.*)
         __text_end = .;
+        _etext = ALIGN(4096);
     } > RAM_HIGH
 
-    .rodata : AT(ADDR(.rodata) - 0x80000000) {
+    .rodata : AT(ADDR(.rodata) - 0x80000000) ALIGN(4096) {
+        _srodata = .;
         *(.rodata .rodata.* .srodata .srodata.*)
+        _erodata = ALIGN(4096);
     } > RAM_HIGH
 
-    .data : AT(ADDR(.data) - 0x80000000) {
+    .data : AT(ADDR(.data) - 0x80000000) ALIGN(4096) {
         __data_start = .;
+        _sdata = .;
         *(.data .data.* .sdata .sdata.*)
         __data_end = .;
+        _edata = .;
     } > RAM_HIGH
 
     /* ----------------------------------------------------------
@@ -90,6 +97,7 @@ SECTIONS
         __pagetable_end = .;
 
         __bss_start = .;
+        _sbss = .;
         *(.bss .bss.* .sbss .sbss.* COMMON)
 
         /* ISR stack lives in high-half, used after we jump high. */
@@ -99,7 +107,73 @@ SECTIONS
         __freertos_irq_stack_top = .;
 
         __bss_end = .;
+        _ebss = .;
     } > RAM_HIGH
+
+    /* heap_4 arena in its own named section so the PMM can reserve it. */
+    .heap4 (NOLOAD) : {
+        _heap_start = .;
+        KEEP(*(.heap4))
+        _heap_end = .;
+    } > RAM_HIGH
+
+    /* Kernel VA end and derived PA end for PMM bootstrap.
+     * Page-align so .user_text LMA is 4 KiB-aligned (required by Sv32). */
+    . = ALIGN(4096);
+    _kernel_end = .;
+    _kernel_vma_start = 0x80100000;
+    _kernel_phys_end = _kernel_end - 0x80000000;
+
+    /* ----------------------------------------------------------
+     *  User programs: each gets its own output section whose VMA is
+     *  the same (0x00400000) but whose LMA is chained after the
+     *  previous one inside the kernel image. The kernel maps each
+     *  blob into a fresh address space at spawn time via
+     *  mm_map_pages(vma, lma, R|X|U). The shared VMA is a fiction —
+     *  no kernel code ever fetches from 0x00400000 directly — so we
+     *  pass -Wl,--no-check-sections in LDFLAGS to silence the
+     *  overlap complaint.
+     * ---------------------------------------------------------- */
+    .user_text.init 0x00400000 : AT(_kernel_phys_end) ALIGN(4096)
+    {
+        _user_init_vma = .;
+        KEEP(*(.user_text.init))
+        KEEP(*(.user_rodata.init))
+        . = ALIGN(4096);
+        _user_init_end = .;
+    }
+    _user_init_lma  = LOADADDR(.user_text.init);
+    _user_init_size = _user_init_end - _user_init_vma;
+
+    .user_text.hello 0x00400000 : AT(_user_init_lma + _user_init_size) ALIGN(4096)
+    {
+        _user_hello_vma = .;
+        KEEP(*(.user_text.hello))
+        KEEP(*(.user_rodata.hello))
+        . = ALIGN(4096);
+        _user_hello_end = .;
+    }
+    _user_hello_lma  = LOADADDR(.user_text.hello);
+    _user_hello_size = _user_hello_end - _user_hello_vma;
+
+    .user_text.bad 0x00400000 : AT(_user_hello_lma + _user_hello_size) ALIGN(4096)
+    {
+        _user_bad_vma = .;
+        KEEP(*(.user_text.bad))
+        KEEP(*(.user_rodata.bad))
+        . = ALIGN(4096);
+        _user_bad_end = .;
+    }
+    _user_bad_lma  = LOADADDR(.user_text.bad);
+    _user_bad_size = _user_bad_end - _user_bad_vma;
+
+    /* Back-compat aliases so existing code that still references
+     * _user_text_vma/_lma/_size keeps working until we migrate it
+     * (spawn.c still spawns exactly one user task: init). */
+    _user_text_vma  = _user_init_vma;
+    _user_text_lma  = _user_init_lma;
+    _user_text_size = _user_init_size;
+    _user_text_end  = _user_init_end;
 
     /* ----------------------------------------------------------
      *  Tiny physical-address stack used before MMU is on.
@@ -115,12 +189,10 @@ SECTIONS
         __boot_stack_top = .;
     } > RAM_PHYS
 
-    /* Sanity: make sure we didn't overflow 1 MiB RAM.
-     * Every loadable section has LMA = VMA - 0x80000000 exactly, so
-     * LOADADDR(.data) + SIZEOF(.data) gives the last used PA.           */
-    ASSERT((LOADADDR(.data) + SIZEOF(.data) - ORIGIN(RAM_PHYS))
+    /* Sanity: make sure kernel + all user programs fit in 1 MiB RAM. */
+    ASSERT((_user_bad_lma + _user_bad_size - ORIGIN(RAM_PHYS))
            < LENGTH(RAM_PHYS),
-           "ERROR: kernel image does not fit in 1 MiB RAM")
+           "ERROR: kernel+user image does not fit in 1 MiB RAM")
 
     /DISCARD/ : { *(.comment) *(.note.*) *(.eh_frame) }
 }

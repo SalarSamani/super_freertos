@@ -1,0 +1,20 @@
+{
+    "configurations": [
+        {
+            "name": "super_freertos",
+            "includePath": [
+                "${workspaceFolder}/include",
+                "${workspaceFolder}/arch/riscv32",
+                "${workspaceFolder}/user",
+                "${workspaceFolder}/mm"
+            ],
+            "defines": [
+                "CONFIG_TIMER_RELOAD=500000"
+            ],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "c11",
+            "intelliSenseMode": "gcc-x86"
+        }
+    ],
+    "version": 4
+}

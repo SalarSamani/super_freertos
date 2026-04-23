@@ -43,7 +43,8 @@
 #define CTX_X31   120
 #define CTX_SEPC  124
 #define CTX_SSTAT 128
-#define CTX_PAD   132     /* keep 16-byte alignment */
-#define CTX_SIZE  136
+#define CTX_PREVTOS 132   /* saved pxTopOfStack at trap entry */
+#define CTX_PAD   136
+#define CTX_SIZE  144
 
 #endif

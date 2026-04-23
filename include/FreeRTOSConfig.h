@@ -29,10 +29,10 @@
 #define configUSE_TIME_SLICING              1
 
 /* --------- Memory ----------------------------------------- */
-#define configSUPPORT_STATIC_ALLOCATION     0
+#define configSUPPORT_STATIC_ALLOCATION     1
 #define configSUPPORT_DYNAMIC_ALLOCATION    1
 #define configTOTAL_HEAP_SIZE               ((size_t)(64 * 1024))
-#define configAPPLICATION_ALLOCATED_HEAP    0
+#define configAPPLICATION_ALLOCATED_HEAP    1
 #define configISR_STACK_SIZE_WORDS          2048             /* 8 KiB */
 
 /* --------- Hook functions --------------------------------- */
@@ -50,6 +50,16 @@
 #define configTIMER_TASK_PRIORITY           (configMAX_PRIORITIES - 1)
 #define configTIMER_QUEUE_LENGTH            8
 #define configTIMER_TASK_STACK_DEPTH        (configMINIMAL_STACK_SIZE * 2)
+
+/* --------- Thread-local storage -------------------------- */
+/* Slot 0: struct mm *   (per-task address space)
+ * Slot 1: uintptr_t     (kernel stack top, for sscratch swap)
+ * Slot 2: struct proc * (process-table back-pointer)        */
+#define configNUM_THREAD_LOCAL_STORAGE_POINTERS  3
+
+/* Context-switch hook: swap satp + sscratch when a new task runs. */
+extern void vApplicationTaskSwitchedIn(void);
+#define traceTASK_SWITCHED_IN()   vApplicationTaskSwitchedIn()
 
 /* --------- Optional API ----------------------------------- */
 #define INCLUDE_vTaskPrioritySet            1

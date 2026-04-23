@@ -752,6 +752,9 @@
 
         /* Just to avoid compiler warnings. */
         ( void ) pvParameters;
+        *(volatile uint32_t *)0x00020000 = 'T';
+        *(volatile uint32_t *)0x00020000 = 'M';
+        *(volatile uint32_t *)0x00020000 = '\n';
 
         #if ( configUSE_DAEMON_TASK_STARTUP_HOOK == 1 )
         {
